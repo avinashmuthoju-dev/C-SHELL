@@ -20,7 +20,8 @@ int main(){
 
         get_path(path,home_dir,curr_dir);
         printf("<%s@%s:%s>",user_name,host_name,path);
-        scanf("%s",input);
+        
+        fgets(input,sizeof(input),stdin);
     }    
     
 }
