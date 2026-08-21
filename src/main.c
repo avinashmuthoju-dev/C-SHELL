@@ -1,7 +1,10 @@
 #include<stdio.h>
 #include<unistd.h>
 #include<stdlib.h>
+#include<string.h>
 #include "user_path.h"
+#include "lexer.h"
+#include "parser.h"
 
 char curr_dir[1024];
 char host_name[1024];
@@ -22,6 +25,14 @@ int main(){
         printf("<%s@%s:%s>",user_name,host_name,path);
         
         fgets(input,sizeof(input),stdin);
+        input[strcspn(input,"\n")]='\0';
+        free_tokens();
+        if(lexing(input)==0){
+            continue;
+        }
+        if(!parsing()){
+            printf("cshell: invalid syntax\n");
+        }
     }    
     
 }
