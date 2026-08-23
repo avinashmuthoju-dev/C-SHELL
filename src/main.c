@@ -6,6 +6,7 @@
 #include "lexer.h"
 #include "parser.h"
 #include "hop.h"
+#include "reveal.h"
 
 char curr_dir[1024];
 char host_name[1024];
@@ -38,6 +39,9 @@ int main(){
         else{
             if(strcmp(Token->value,"hop")==0){
                 exec_hop(Token);
+            }
+            else if(strcmp(Token->value,"reveal")==0){
+                exec_reveal(Token);
             }
         }
 
