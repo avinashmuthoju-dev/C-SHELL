@@ -7,6 +7,7 @@
 #include "parser.h"
 #include "hop.h"
 #include "reveal.h"
+#include "peek.h"
 
 char curr_dir[1024];
 char host_name[1024];
@@ -42,6 +43,9 @@ int main(){
             }
             else if(strcmp(Token->value,"reveal")==0){
                 exec_reveal(Token);
+            }
+            else if(strcmp(Token->value,"peek")==0){
+                exec_peak(Token);
             }
         }
 
