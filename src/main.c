@@ -2,12 +2,14 @@
 #include<unistd.h>
 #include<stdlib.h>
 #include<string.h>
+
 #include "user_path.h"
 #include "lexer.h"
 #include "parser.h"
 #include "hop.h"
 #include "reveal.h"
 #include "peek.h"
+#include "locate.h"
 
 char curr_dir[1024];
 char host_name[1024];
@@ -46,6 +48,9 @@ int main(){
             }
             else if(strcmp(Token->value,"peek")==0){
                 exec_peak(Token);
+            }
+            else if(strcmp(Token->value,"locate")==0){
+                exec_locate(Token);
             }
         }
 
