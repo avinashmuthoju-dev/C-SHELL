@@ -10,6 +10,7 @@
 #include "reveal.h"
 #include "peek.h"
 #include "locate.h"
+#include "command.h"
 
 char curr_dir[1024];
 char host_name[1024];
@@ -51,6 +52,9 @@ int main(){
             }
             else if(strcmp(Token->value,"locate")==0){
                 exec_locate(Token);
+            }
+            else{
+                exec_command(Token);
             }
         }
 
