@@ -2,12 +2,13 @@
 #include<stdlib.h>
 #include<unistd.h>
 #include<string.h>
+#include<limits.h>
 #include "hop.h"
 #include "lexer.h"
 #include "frecency.h"
 
-char home_Dir[1024];
-char prev_dir[1024];
+char home_Dir[PATH_MAX];
+char prev_dir[PATH_MAX];
 int prev_dir_flag=0;
 
 void init_hop(char *home_dir_path){
@@ -15,7 +16,7 @@ void init_hop(char *home_dir_path){
     init_frecency();
 }
 int change_dir(char *path){
-    char curr_wd[1024];
+    char curr_wd[PATH_MAX];
 
     if(getcwd(curr_wd,sizeof(curr_wd))==NULL){
         return 0;
@@ -26,7 +27,7 @@ int change_dir(char *path){
     strcpy(prev_dir,curr_wd);
     prev_dir_flag=1;
 
-    char new_wd[1024];
+    char new_wd[PATH_MAX];
     if(getcwd(new_wd, sizeof(new_wd)) != NULL) {
         record_visit(new_wd);
     }
@@ -65,7 +66,7 @@ void exec_hop(struct token *current){
         }
         else{
             if(!change_dir(current->value)){
-                char result[1024];
+                char result[PATH_MAX];
                 if(find_frecency_match(current->value,result)){
                     if(!change_dir(result)){
                         printf("hop: no such directory\n");

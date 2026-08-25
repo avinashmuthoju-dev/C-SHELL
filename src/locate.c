@@ -3,6 +3,7 @@
 #include<string.h>
 #include<unistd.h>
 #include<sys/stat.h>
+#include<limits.h>
 
 #include "locate.h"
 #include "lexer.h"
@@ -24,14 +25,19 @@ int is_executable(char *path){
 
 int search_current_directory(char *filename){
 
-    char cwd[1024];
-    char full_path[4096];
+    char cwd[PATH_MAX];
+    char full_path[PATH_MAX];
 
     if(getcwd(cwd,sizeof(cwd))==NULL){
         return 0;
     }
 
-    snprintf(full_path,sizeof(full_path),"%s/%s",cwd,filename);
+    if (strlen(cwd) + strlen(filename) + 2 >= sizeof(full_path)) {
+        return 0;
+    }
+    strcpy(full_path,cwd);
+    strcat(full_path,"/");
+    strcat(full_path,filename);
 
     if(is_executable(full_path)){
         printf("%s\n",full_path);
@@ -48,16 +54,40 @@ int search_path(char *filename){
         return 0;
     }
         
-    char path_copy[4096];
+    char path_copy[PATH_MAX];
     strcpy(path_copy,path);
 
     char *dir=strtok(path_copy,":");
 
     while(dir!=NULL){
 
-        char full_path[2048];
+        char full_path[PATH_MAX];
 
-        snprintf(full_path,sizeof(full_path),"%s/%s",dir,filename);
+        if(dir[0]=='/'){
+            if (strlen(dir) + strlen(filename) + 2 >= sizeof(full_path)) {
+                dir=strtok(NULL,":");
+                continue;
+            }
+            strcpy(full_path,dir);
+            strcat(full_path,"/");
+            strcat(full_path,filename);
+        }
+        else{
+            char cwd[PATH_MAX];
+            if(getcwd(cwd,sizeof(cwd))==NULL){
+                dir=strtok(NULL,":");
+                continue;
+            }
+            if (strlen(cwd) + strlen(dir) + strlen(filename) + 3 >= sizeof(full_path)) {
+                dir=strtok(NULL,":");
+                continue;
+            }
+            strcpy(full_path,cwd);
+            strcat(full_path,"/");
+            strcat(full_path,dir);
+            strcat(full_path,"/");
+            strcat(full_path,filename);
+        }
 
         if(is_executable(full_path)){
             printf("%s\n",full_path);

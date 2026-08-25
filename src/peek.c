@@ -261,7 +261,7 @@ void exec_peak(struct token *current){
             continue;
         }
         else{
-          char ch;
+          int ch;
           while((ch=fgetc(fp))!=EOF){
             putchar(ch);
           }

@@ -9,7 +9,7 @@
 #define MAX_ENTRIES 1000
 
 struct frecency_entry{
-    char path[1024];
+    char path[PATH_MAX];
     long long frequency;
     long long last_visit;
 };
@@ -24,7 +24,7 @@ void load_frecency(){
         return;
     }
 
-    char line[1124];
+    char line[PATH_MAX + 100];
     while(fgets(line,sizeof(line),fp)!=NULL){
         if(entry_count>=MAX_ENTRIES){
             break;
@@ -32,7 +32,7 @@ void load_frecency(){
 
         long long frequency;
         long long last_visit;
-        char path[1024];
+        char path[PATH_MAX];
         if(sscanf(line,
                    "%lld %lld %[^\n]",
                    &frequency,

@@ -2,6 +2,7 @@
 #include<unistd.h>
 #include<stdlib.h>
 #include<string.h>
+#include<limits.h>
 
 #include "user_path.h"
 #include "lexer.h"
@@ -12,9 +13,9 @@
 #include "locate.h"
 #include "command.h"
 
-char curr_dir[1024];
+char curr_dir[PATH_MAX];
 char host_name[1024];
-char home_dir[1024];
+char home_dir[PATH_MAX];
 
 int main(){
     
@@ -22,7 +23,7 @@ int main(){
     gethostname(host_name, sizeof(host_name));
     getcwd(home_dir,sizeof(home_dir));
     init_hop(home_dir);
-    char path[1024];
+    char path[PATH_MAX];
     char input[1024];
     while(1){
         
@@ -31,10 +32,15 @@ int main(){
         get_path(path,home_dir,curr_dir);
         printf("<%s@%s:%s>",user_name,host_name,path);
         
-        fgets(input,sizeof(input),stdin);
+        if(fgets(input,sizeof(input),stdin)==NULL){
+            break;
+        }
         input[strcspn(input,"\n")]='\0';
         free_tokens();
         if(lexing(input)==0){
+            continue;
+        }
+        if(Token==NULL){
             continue;
         }
         if(!parsing()){

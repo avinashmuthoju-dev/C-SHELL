@@ -1,9 +1,10 @@
 #ifndef HOP_H
 #define HOP_H
 
+#include <limits.h>
 
-extern char home_Dir[1024];
-extern char prev_dir[1024];
+extern char home_Dir[PATH_MAX];
+extern char prev_dir[PATH_MAX];
 extern int prev_dir_flag;
 
 struct token;
