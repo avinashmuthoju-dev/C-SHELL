@@ -9,7 +9,8 @@
 
 #include "command.h"
 #include "lexer.h"
-
+#include "background.h"
+#include "terminal.h"
 
 int setup_input(char **files, int file_count, pid_t *writer_pid);
 
@@ -444,182 +445,388 @@ int parse_pipeline(struct token *current,struct pipeline_stage **stages,int *sta
     return 1;
 }
 
-void run_pipeline(struct pipeline_stage *stages, int stage_count){
+void run_pipeline(struct pipeline_stage *stages, int stage_count)
+{
     int pipe_count = stage_count - 1;
+
     int pipes[100][2];
+
     pid_t children[100];
-    for (int i = 0; i < stage_count; i++) {
+
+    /*
+     * Initialize children array.
+     */
+    for (int i = 0; i < stage_count; i++)
+    {
+        children[i] = -1;
+    }
+
+    for (int i = 0; i < stage_count; i++)
+    {
         stages[i].input_fd = -1;
         stages[i].input_writer = -1;
-        if (stages[i].input_count > 0) {
-            stages[i].input_fd = setup_input(stages[i].input_files,stages[i].input_count,&stages[i].input_writer);
-            if (stages[i].input_fd == -1) {
+
+        if (stages[i].input_count > 0)
+        {
+            stages[i].input_fd =
+                setup_input(stages[i].input_files,
+                            stages[i].input_count,
+                            &stages[i].input_writer);
+
+            if (stages[i].input_fd == -1)
+            {
                 stages[i].setup_failed = 1;
             }
         }
+
         if (stages[i].output_count > 0 &&
-            !open_output_files(stages[i].output_files,stages[i].output_count,stages[i].output_fds)){
+            !open_output_files(stages[i].output_files,
+                                stages[i].output_count,
+                                stages[i].output_fds))
+        {
             stages[i].setup_failed = 1;
         }
     }
-
-    for (int i = 0; i < pipe_count; i++) {
-        if (pipe(pipes[i]) == -1) {
-            for (int j = 0; j < i; j++) {
+    for (int i = 0; i < pipe_count; i++)
+    {
+        if (pipe(pipes[i]) == -1)
+        {
+            for (int j = 0; j < i; j++)
+            {
                 close(pipes[j][0]);
                 close(pipes[j][1]);
             }
-            for (int j = 0; j < stage_count; j++) {
-                if (stages[j].input_fd != -1) {
+
+            for (int j = 0; j < stage_count; j++)
+            {
+                if (stages[j].input_fd != -1)
+                {
                     close(stages[j].input_fd);
                 }
-                if (stages[j].input_writer != -1) {
-                    waitpid(stages[j].input_writer, NULL, 0);
+
+                if (stages[j].input_writer != -1)
+                {
+                    waitpid(stages[j].input_writer,
+                            NULL,
+                            0);
                 }
-                if (!stages[j].setup_failed) {
-                    for (int k = 0; k < stages[j].output_count; k++) {
+
+                if (!stages[j].setup_failed)
+                {
+                    for (int k = 0;
+                         k < stages[j].output_count;
+                         k++)
+                    {
                         close(stages[j].output_fds[k]);
                     }
                 }
             }
+
             return;
         }
     }
 
-    for (int i = 0; i < stage_count; i++) {
-        if (stages[i].output_count > 1 && !stages[i].setup_failed &&
-            !start_output_copier(stages, i, pipes, pipe_count, stage_count)) {
-            stages[i].setup_failed = 1;
-            for (int j = 0; j < stages[i].output_count; j++) {
-                close(stages[i].output_fds[j]);
+    for (int i = 0; i < stage_count; i++)
+    {
+        if (stages[i].output_count > 1 &&
+            !stages[i].setup_failed)
+        {
+            if (!start_output_copier(stages,
+                                     i,
+                                     pipes,
+                                     pipe_count,
+                                     stage_count))
+            {
+                stages[i].setup_failed = 1;
+
+                for (int j = 0;
+                     j < stages[i].output_count;
+                     j++)
+                {
+                    close(stages[i].output_fds[j]);
+                }
             }
         }
     }
 
-    for (int i = 0; i < stage_count; i++) {
+    sigset_t oldmask = block_sigchld();
+    for (int i = 0; i < stage_count; i++)
+    {
         children[i] = fork();
-        if (children[i] == -1) {
+
+        if (children[i] == -1)
+        {
             children[i] = -1;
             continue;
         }
-        if (children[i] == 0) {
+
+        if (children[i] == 0)
+        {
+            signal(SIGINT, SIG_DFL);
+            signal(SIGTSTP, SIG_DFL);
+            signal(SIGTTOU, SIG_DFL);
+            signal(SIGTTIN, SIG_DFL);
+            if (i == 0)
+            {
+                setpgid(0, 0);
+            }
+            else
+            {
+                setpgid(0, children[0]);
+            }
+            restore_sigchld(oldmask);
             char path[PATH_MAX];
             char *argv0;
-
-            if (stages[i].setup_failed) {
-                if (stages[i].input_count > 0) {
-                    fprintf(stderr, "cshell: no such file or directory\n");
+            if (stages[i].setup_failed)
+            {
+                if (stages[i].input_count > 0)
+                {
+                    fprintf(stderr,
+                            "cshell: no such file or directory\n");
                 }
+
                 _exit(1);
             }
-            if (!resolve_command(stages[i].argv[0], path, &argv0)) {
-                fprintf(stderr, "cshell: command not found (%s)\n",
+
+            if (!resolve_command(stages[i].argv[0],
+                                 path,
+                                 &argv0))
+            {
+                fprintf(stderr,
+                        "cshell: command not found (%s)\n",
                         argv0);
+
                 _exit(1);
             }
+
             stages[i].argv[0] = argv0;
 
-            if (stages[i].input_fd != -1) {
-                if (dup2(stages[i].input_fd, STDIN_FILENO) == -1) {
+            if (stages[i].input_fd != -1)
+            {
+                if (dup2(stages[i].input_fd,
+                         STDIN_FILENO) == -1)
+                {
                     _exit(1);
                 }
             }
-            else if (i > 0) {
-                if (dup2(pipes[i - 1][0], STDIN_FILENO) == -1) {
+            else if (i > 0)
+            {
+                if (dup2(pipes[i - 1][0],
+                         STDIN_FILENO) == -1)
+                {
                     _exit(1);
                 }
             }
-            if (stages[i].output_count == 0 && i < stage_count - 1) {
-                if (dup2(pipes[i][1], STDOUT_FILENO) == -1) {
+
+            if (stages[i].output_count == 0 &&
+                i < stage_count - 1)
+            {
+                if (dup2(pipes[i][1],
+                         STDOUT_FILENO) == -1)
+                {
                     _exit(1);
                 }
             }
-            else if (stages[i].output_count == 1 &&
-                     !stages[i].setup_failed) {
-                if (dup2(stages[i].output_fds[0], STDOUT_FILENO) == -1) {
+            else if (stages[i].output_count == 1)
+            {
+                if (dup2(stages[i].output_fds[0],
+                         STDOUT_FILENO) == -1)
+                {
                     _exit(1);
                 }
             }
-            else if (stages[i].output_count > 1 &&
-                     !stages[i].setup_failed) {
-                if (dup2(stages[i].output_pipe[1], STDOUT_FILENO) == -1) {
+            else if (stages[i].output_count > 1)
+            {
+                if (dup2(stages[i].output_pipe[1],
+                         STDOUT_FILENO) == -1)
+                {
                     _exit(1);
                 }
             }
-            for (int j = 0; j < pipe_count; j++) {
+
+            for (int j = 0; j < pipe_count; j++)
+            {
                 close(pipes[j][0]);
                 close(pipes[j][1]);
             }
-            for (int j = 0; j < stage_count; j++) {
-                if (stages[j].output_count > 1 &&
-                    !stages[j].setup_failed) {
-                    if (j == i) {
-                        close(stages[j].output_pipe[0]);
-                    } else {
-                        close(stages[j].output_pipe[1]);
-                        close(stages[j].output_pipe[0]);
-                    }
-                }
-            }
-            if (stages[i].input_fd != -1) {
-                close(stages[i].input_fd);
-            }
-            for (int j = 0; j < stage_count; j++) {
-                if (j != i && stages[j].input_fd != -1) {
+
+            for (int j = 0;
+                 j < stage_count;
+                 j++)
+            {
+                if (stages[j].input_fd != -1)
+                {
                     close(stages[j].input_fd);
                 }
-            }
-            for (int j = 0; j < stage_count; j++) {
-                if (stages[j].output_count > 0 && !stages[j].setup_failed) {
-                    for (int k = 0; k < stages[j].output_count; k++) {
+
+                if (stages[j].output_count > 0 &&
+                    !stages[j].setup_failed)
+                {
+                    for (int k = 0;
+                         k < stages[j].output_count;
+                         k++)
+                    {
                         close(stages[j].output_fds[k]);
                     }
                 }
+
+                if (stages[j].output_count > 1 &&
+                    !stages[j].setup_failed)
+                {
+                    close(stages[j].output_pipe[0]);
+                    close(stages[j].output_pipe[1]);
+                }
             }
+
             execv(path, stages[i].argv);
+
             _exit(1);
         }
-    }
-    close_pipeline_pipes(pipes, pipe_count);
-    for (int i = 0; i < stage_count; i++) {
-        if (stages[i].output_pipe[0] != -1) {
-            close(stages[i].output_pipe[0]);
-            close(stages[i].output_pipe[1]);
+
+        if (i == 0)
+        {
+            setpgid(children[0], children[0]);
         }
-        if (stages[i].input_fd != -1) {
+        else
+        {
+            setpgid(children[i], children[0]);
+        }
+    }
+    if (children[0] == -1)
+    {
+        restore_sigchld(oldmask);
+
+        for (int i = 0; i < pipe_count; i++)
+        {
+            close(pipes[i][0]);
+            close(pipes[i][1]);
+        }
+
+        return;
+    }
+    pid_t pgid = children[0];
+
+    give_terminal_to(pgid);
+
+    int stopped =
+        wait_foreground_group(pgid,
+                              children,
+                              stage_count);
+
+    reclaim_terminal();
+    if (stopped == 2){
+      printf("\n");
+    }
+    if (stopped==1)
+    {
+        pid_t pids[100];
+
+        char *names[100];
+
+        int proc_count = 0;
+
+
+        for (int i = 0;
+             i < stage_count;
+             i++)
+        {
+            if (children[i] != -1)
+            {
+                pids[proc_count] = children[i];
+
+                names[proc_count] =
+                    stages[i].argv[0];
+
+                proc_count++;
+            }
+        }
+        char cmdline[256] = "";
+for (int i = 0; i < stage_count; i++) {
+    if (i > 0) strncat(cmdline, " | ", sizeof(cmdline) - strlen(cmdline) - 1);
+    for (int j = 0; j < stages[i].argc; j++) {
+        strncat(cmdline, stages[i].argv[j], sizeof(cmdline) - strlen(cmdline) - 1);
+        if (j < stages[i].argc - 1) strncat(cmdline, " ", sizeof(cmdline) - strlen(cmdline) - 1);
+    }
+}
+        register_stopped_job(pgid,
+                             pids,
+                             names,
+                             proc_count,cmdline);
+    }
+
+    restore_sigchld(oldmask);
+
+    for (int i = 0; i < pipe_count; i++)
+    {
+        close(pipes[i][0]);
+        close(pipes[i][1]);
+    }
+
+    for (int i = 0;
+         i < stage_count;
+         i++)
+    {
+        if (stages[i].input_fd != -1)
+        {
             close(stages[i].input_fd);
         }
-        if (stages[i].input_writer != -1) {
-            waitpid(stages[i].input_writer, NULL, 0);
-        }
-        if (!stages[i].setup_failed) {
-            for (int j = 0; j < stages[i].output_count; j++) {
+
+
+        if (stages[i].output_count > 0 &&
+            !stages[i].setup_failed)
+        {
+            for (int j = 0;
+                 j < stages[i].output_count;
+                 j++)
+            {
                 close(stages[i].output_fds[j]);
             }
         }
-    }
-    for(int i = 0; i < stage_count; i++) {
-        if (children[i] != -1) {
-            waitpid(children[i], NULL, 0);
-        }
-        if (stages[i].output_writer != -1) {
-            waitpid(stages[i].output_writer, NULL, 0);
+
+
+        if (stages[i].output_pipe[0] != -1)
+        {
+            close(stages[i].output_pipe[0]);
+            close(stages[i].output_pipe[1]);
         }
     }
 }
 
-void exec_command(struct token *current){
-    if (has_pipeline(current)) {
+int exec_command(struct token *current)
+{
+    if (has_pipeline(current))
+    {
         struct pipeline_stage *stages;
         int stage_count;
-        if (!parse_pipeline(current, &stages, &stage_count)) {
+
+        if (!parse_pipeline(current, &stages, &stage_count))
+        {
             printf("cshell: invalid syntax\n");
-            return;
+            return 0;
         }
+
         run_pipeline(stages, stage_count);
+
         free(stages);
-        return;
+        return 0;
     }
+    struct pipeline_stage stage;
+
+    memset(&stage, 0, sizeof(stage));
+
+    stage.argc = 0;
+    stage.input_count = 0;
+    stage.output_count = 0;
+
+    stage.input_fd = -1;
+    stage.input_writer = -1;
+
+    stage.output_pipe[0] = -1;
+    stage.output_pipe[1] = -1;
+    stage.output_writer = -1;
+
+    stage.setup_failed = 0;
+
     char *argv[100];
     int argc;
 
@@ -629,48 +836,429 @@ void exec_command(struct token *current){
     struct output_file files[100];
     int file_count;
 
-    if(!parse_input_redirect(current, argv, &argc, input_files,&input_file_count)){
+    if (!parse_input_redirect(current,
+                              argv,
+                              &argc,
+                              input_files,
+                              &input_file_count))
+    {
         printf("cshell: invalid syntax\n");
-        return;
+        return 0;
     }
-    if(!parse_output_redirection(argv,&argc,files,&file_count)){
-        return;
+
+    if (!parse_output_redirection(argv,
+                                  &argc,
+                                  files,
+                                  &file_count))
+    {
+        return 0;
     }
-    if(argc==0){
-        return;
+
+    if (argc == 0)
+    {
+        return 0;
     }
-    char *command=argv[0];
+
+
+    char *command = argv[0];
     char path[PATH_MAX];
 
-    if(strchr(command,'/')!=NULL){
-        if(is_executable(command)){
-            run_command_with_output(command,argv,input_files,input_file_count,files,file_count);
-        }
-        else{
-            printf("cshell: command not found (%s)\n", command);
-        }
-    }
-    else if(command[0]=='%'){
-        char *name = command + 1;
-        if(find_path(name,path)){
-            argv[0] = name;
-            run_command_with_output(path,argv,input_files,input_file_count,files,file_count);
-        }
-        else{
-            printf("cshell: command not found (%s)\n", name);
-        }
-    }
-    else{
-        snprintf(path,sizeof(path),"./%s",command);
 
-        if(is_executable(path)){
-            run_command_with_output(path,argv,input_files,input_file_count,files,file_count);
+    if (strchr(command, '/') != NULL)
+    {
+        if (!is_executable(command))
+        {
+            printf("cshell: command not found (%s)\n",
+                   command);
+
+            return 1;
         }
-        else if(find_path(command,path)){
-            run_command_with_output(path,argv,input_files,input_file_count,files,file_count);
+
+        snprintf(path,
+                 sizeof(path),
+                 "%s",
+                 command);
+    }
+
+    else if (command[0] == '%')
+    {
+        char *name = command + 1;
+
+        if (!find_path(name, path))
+        {
+            printf("cshell: command not found (%s)\n",
+                   name);
+
+            return 1;
         }
-        else {
-            printf("cshell: command not found (%s)\n", command);
+
+        argv[0] = name;
+    }
+
+    else
+    {
+        snprintf(path,
+                 sizeof(path),
+                 "./%s",
+                 command);
+
+        if (!is_executable(path))
+        {
+            if (!find_path(command, path))
+            {
+                printf("cshell: command not found (%s)\n",
+                       command);
+
+                return 1;
+            }
         }
     }
+    for (int i = 0; i < argc; i++)
+    {
+        stage.argv[i] = argv[i];
+    }
+
+    stage.argv[argc] = NULL;
+    stage.argc = argc;
+    for (int i = 0; i < input_file_count; i++)
+    {
+        stage.input_files[i] = input_files[i];
+    }
+
+    stage.input_count = input_file_count;
+
+
+    for (int i = 0; i < file_count; i++)
+    {
+        stage.output_files[i] = files[i];
+    }
+
+    stage.output_count = file_count;
+
+    if (strchr(command, '/') != NULL)
+    {
+        stage.argv[0] = command;
+    }
+    else if (command[0] == '%')
+    {
+        stage.argv[0] = command + 1;
+    }
+    else
+    {
+        stage.argv[0] = command;
+    }
+    run_pipeline(&stage, 1);
+
+    return 0;
+}
+int exec_background_command(struct token *current)
+{
+    char *argv[100];
+    int argc;
+    char *input_files[100];
+    int input_file_count;
+    struct output_file files[100];
+    int file_count;
+
+    if (!parse_input_redirect(current, argv, &argc, input_files, &input_file_count))
+    {
+        printf("cshell: invalid syntax\n");
+        return 1;
+    }
+
+    if (!parse_output_redirection(argv, &argc, files, &file_count))
+    {
+        printf("cshell: invalid syntax\n");
+        return 1;
+    }
+
+    if (argc == 0)
+    {
+        printf("cshell: invalid syntax\n");
+        return 1;
+    }
+
+    char *command = argv[0];
+    char path[PATH_MAX];
+    char *resolved_name = command;
+
+    if (strchr(command, '/') != NULL)
+    {
+        if (!is_executable(command))
+        {
+            printf("cshell: command not found (%s)\n", command);
+            return 1;
+        }
+        snprintf(path, sizeof(path), "%s", command);
+    }
+    else if (command[0] == '%')
+    {
+        resolved_name = command + 1;
+        if (!find_path(resolved_name, path))
+        {
+            printf("cshell: command not found (%s)\n", resolved_name);
+            return 1;
+        }
+        argv[0] = resolved_name;
+    }
+    else
+    {
+        snprintf(path, sizeof(path), "./%s", command);
+        if (!is_executable(path))
+        {
+            if (!find_path(command, path))
+            {
+                printf("cshell: command not found (%s)\n", command);
+                return 1;
+            }
+        }
+    }
+
+    return run_background(path, argv, input_files, input_file_count, files, file_count);
+}
+
+int run_pipeline_background(struct pipeline_stage *stages, int stage_count)
+{
+    int pipe_count = stage_count - 1;
+    int pipes[100][2];
+    pid_t children[100];
+
+    for (int i = 0; i < stage_count; i++)
+    {
+        stages[i].input_fd = -1;
+        stages[i].input_writer = -1;
+
+        if (stages[i].input_count > 0)
+        {
+            stages[i].input_fd = setup_input(stages[i].input_files,
+                                            stages[i].input_count,
+                                            &stages[i].input_writer);
+            if (stages[i].input_fd == -1)
+                stages[i].setup_failed = 1;
+        }
+
+        if (stages[i].output_count > 0 &&
+            !open_output_files(stages[i].output_files,
+                              stages[i].output_count,
+                              stages[i].output_fds))
+        {
+            stages[i].setup_failed = 1;
+        }
+    }
+
+    for (int i = 0; i < pipe_count; i++)
+    {
+        if (pipe(pipes[i]) == -1)
+        {
+            for (int j = 0; j < stage_count; j++)
+            {
+                if (stages[j].input_fd != -1)
+                    close(stages[j].input_fd);
+            }
+            return 1;
+        }
+    }
+
+    for (int i = 0; i < stage_count; i++)
+    {
+        if (stages[i].output_count > 1 && !stages[i].setup_failed)
+        {
+            if (pipe(stages[i].output_pipe) == -1)
+            {
+                stages[i].setup_failed = 1;
+                continue;
+            }
+
+            stages[i].output_writer = fork();
+            if (stages[i].output_writer == -1)
+            {
+                stages[i].setup_failed = 1;
+                close(stages[i].output_pipe[0]);
+                close(stages[i].output_pipe[1]);
+                continue;
+            }
+
+            if (stages[i].output_writer == 0)
+            {
+                close(stages[i].output_pipe[1]);
+
+                char buffer[4096];
+                ssize_t bytes;
+
+                while ((bytes = read(stages[i].output_pipe[0], buffer, sizeof(buffer))) > 0)
+                {
+                    for (int j = 0; j < stages[i].output_count; j++)
+                    {
+                        ssize_t written = 0;
+                        while (written < bytes)
+                        {
+                            ssize_t result = write(stages[i].output_fds[j],
+                                                  buffer + written,
+                                                  (size_t)(bytes - written));
+                            if (result <= 0)
+                                _exit(1);
+                            written += result;
+                        }
+                    }
+                }
+
+                close(stages[i].output_pipe[0]);
+                for (int j = 0; j < stages[i].output_count; j++)
+                    close(stages[i].output_fds[j]);
+                _exit(0);
+            }
+        }
+    }
+
+    sigset_t oldmask = block_sigchld();
+
+    for (int i = 0; i < stage_count; i++)
+    {
+        children[i] = fork();
+
+        if (children[i] == -1)
+        {
+            children[i] = -1;
+            continue;
+        }
+
+        if (children[i] == 0)
+        {
+            restore_sigchld(oldmask);
+            if (i == 0)
+                setpgid(0, 0);
+            else
+                setpgid(0, children[0]);
+
+            char path[PATH_MAX];
+            char *argv0;
+
+            if (stages[i].setup_failed)
+                _exit(1);
+
+            if (!resolve_command(stages[i].argv[0], path, &argv0))
+            {
+                fprintf(stderr, "cshell: command not found (%s)\n", argv0);
+                _exit(1);
+            }
+            stages[i].argv[0] = argv0;
+            if (stages[i].input_fd != -1)
+            {
+                if (dup2(stages[i].input_fd, STDIN_FILENO) == -1)
+                    _exit(1);
+            }
+            else if (i > 0)
+            {
+                if (dup2(pipes[i - 1][0], STDIN_FILENO) == -1)
+                    _exit(1);
+            }
+
+            if (stages[i].output_count == 0 && i < stage_count - 1)
+            {
+                if (dup2(pipes[i][1], STDOUT_FILENO) == -1)
+                    _exit(1);
+            }
+            else if (stages[i].output_count == 1)
+            {
+                if (dup2(stages[i].output_fds[0], STDOUT_FILENO) == -1)
+                    _exit(1);
+            }
+            else if (stages[i].output_count > 1)
+            {
+                if (dup2(stages[i].output_pipe[1], STDOUT_FILENO) == -1)
+                    _exit(1);
+            }
+
+            for (int j = 0; j < pipe_count; j++)
+            {
+                close(pipes[j][0]);
+                close(pipes[j][1]);
+            }
+
+            for (int j = 0; j < stage_count; j++)
+            {
+                if (stages[j].input_fd != -1)
+                    close(stages[j].input_fd);
+
+                if (stages[j].output_count > 0 && !stages[j].setup_failed)
+                {
+                    for (int k = 0; k < stages[j].output_count; k++)
+                        close(stages[j].output_fds[k]);
+                }
+
+                if (stages[j].output_count > 1 && !stages[j].setup_failed)
+                {
+                    close(stages[j].output_pipe[0]);
+                    close(stages[j].output_pipe[1]);
+                }
+            }
+
+            execv(path, stages[i].argv);
+            _exit(1);
+        }
+
+        /* Parent: mirror the setpgid call so the group is set no
+         * matter which of the two (parent/child) runs first. */
+        if (children[i] != -1)
+        {
+            if (i == 0)
+                setpgid(children[0], children[0]);
+            else
+                setpgid(children[i], children[0]);
+        }
+    }
+
+    if (children[0] != -1)
+    {
+        pid_t pids[100];
+        char *names[100];
+        int proc_count = 0;
+
+        for (int i = 0; i < stage_count; i++)
+        {
+            if (children[i] != -1)
+            {
+                pids[proc_count] = children[i];
+                names[proc_count] = stages[i].argv[0];
+                proc_count++;
+            }
+        }
+        char cmdline[256] = "";
+for (int i = 0; i < stage_count; i++) {
+    if (i > 0) strncat(cmdline, " | ", sizeof(cmdline) - strlen(cmdline) - 1);
+    for (int j = 0; j < stages[i].argc; j++) {
+        strncat(cmdline, stages[i].argv[j], sizeof(cmdline) - strlen(cmdline) - 1);
+        if (j < stages[i].argc - 1) strncat(cmdline, " ", sizeof(cmdline) - strlen(cmdline) - 1);
+    }
+}
+        register_background_job(children[0], pids, names, proc_count,cmdline);
+    }
+
+    restore_sigchld(oldmask);
+
+    for (int i = 0; i < pipe_count; i++)
+    {
+        close(pipes[i][0]);
+        close(pipes[i][1]);
+    }
+
+    for (int i = 0; i < stage_count; i++)
+    {
+        if (stages[i].input_fd != -1)
+            close(stages[i].input_fd);
+
+        if (stages[i].output_count > 0 && !stages[i].setup_failed)
+        {
+            for (int j = 0; j < stages[i].output_count; j++)
+                close(stages[i].output_fds[j]);
+        }
+
+        if (stages[i].output_pipe[0] != -1)
+        {
+            close(stages[i].output_pipe[0]);
+            close(stages[i].output_pipe[1]);
+        }
+    }
+
+    return 0;
 }

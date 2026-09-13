@@ -83,5 +83,6 @@ int parsing(){
     if(parse_line() && current == NULL){
         return 1;
     }
+
     return 0;
 }

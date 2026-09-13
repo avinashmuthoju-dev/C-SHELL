@@ -25,15 +25,24 @@ struct pipeline_stage {
     int setup_failed;
 };
 
-int is_executable(char *path); // its in locate.c
+int is_executable(char *path);
 
-int parse_input_redirect(struct token *current,char **argv,int *argc,char **files,int *file_count);
-int parse_output_redirection(char **argv,int *argc,struct output_file *files,int *file_count);
-int open_output_files(struct output_file *files,int file_count,int *fds);
-int find_path(char *filename,char *result);
-void run_command_with_output(char *path,char **argv,char **input_files,int input_file_count,struct output_file *files,int file_count);
-int setup_input(char **files,int file_count,pid_t *writer_pid);
+int parse_input_redirect(struct token *current, char **argv, int *argc, char **files, int *file_count);
+int parse_output_redirection(char **argv, int *argc, struct output_file *files, int *file_count);
+int open_output_files(struct output_file *files, int file_count, int *fds);
+int find_path(char *filename, char *result);
+void run_command_with_output(char *path, char **argv, char **input_files, int input_file_count, struct output_file *files, int file_count);
+int setup_input(char **files, int file_count, pid_t *writer_pid);
 
-void exec_command(struct token *current);
+int has_pipeline(struct token *current);
+int parse_pipeline(struct token *current, struct pipeline_stage **stages, int *stage_count);
+void run_pipeline(struct pipeline_stage *stages, int stage_count);
+
+int exec_command(struct token *current);
+
+int exec_background_command(struct token *current);
+
+int run_pipeline_background(struct pipeline_stage *stages, int stage_count);
+
 
 #endif
