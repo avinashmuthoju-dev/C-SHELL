@@ -17,6 +17,9 @@
 #include "activities.h"
 #include "terminal.h"
 #include "resume.h"
+#include "ping.h"
+#include "spy.h"
+#include "snoop.h"
 
 char curr_dir[PATH_MAX];
 char host_name[1024];
@@ -79,6 +82,15 @@ int main(){
             }
             else if(strcmp(Token->value,"resume")==0){
                 exec_resume(Token);
+            }
+            else if(strcmp(Token->value,"ping")==0){
+                exec_ping(Token);
+            }
+            else if(strcmp(Token->value,"spy")==0){
+                exec_spy(Token);
+            }
+            else if(strcmp(Token->value,"snoop")==0){
+                exec_snoop(Token);
             }
             else{
                 sequence_command(Token);

@@ -569,6 +569,8 @@ void run_pipeline(struct pipeline_stage *stages, int stage_count)
             if (i == 0)
             {
                 setpgid(0, 0);
+                signal(SIGTTIN, SIG_DFL);
+                signal(SIGTTOU, SIG_DFL);
             }
             else
             {
@@ -1125,8 +1127,11 @@ int run_pipeline_background(struct pipeline_stage *stages, int stage_count)
         if (children[i] == 0)
         {
             restore_sigchld(oldmask);
-            if (i == 0)
+            if (i == 0){
                 setpgid(0, 0);
+                signal(SIGTTIN, SIG_DFL);
+                signal(SIGTTOU, SIG_DFL);
+            }
             else
                 setpgid(0, children[0]);
 

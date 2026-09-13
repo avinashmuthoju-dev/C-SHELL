@@ -431,6 +431,8 @@ int run_background(char *path,
         /* Background command child */
         restore_sigchld(oldmask);
         setpgid(0, 0);
+        signal(SIGTTIN, SIG_DFL);
+        signal(SIGTTOU, SIG_DFL);
         if (input_fd != -1)
         {
             if (dup2(input_fd, STDIN_FILENO) == -1)
