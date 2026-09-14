@@ -1,9 +1,253 @@
+# C-Shell
+It supports command parsing, quoting, redirection, pipelines, background jobs, process groups, terminal control, directory navigation, file inspection, process inspection, signals, and syscall tracing.
+##  Build and Run
+### Requirements
+- Linux/POSIX environment
+- `make`
+### Commands
+```bash
+ make all -> creates .o files and produces shell.out
+
+ ./shell.out -> runs the c-shell
+ 
+
+ make clean ->deletes shell.out and all .o files
+```
+##  Folder Structure
+```text
+c-shell/
+├── Makefile
+├── README.md
+│
+├── include/
+│   ├── activities.h
+│   ├── background.h
+│   ├── command.h
+│   ├── frecency.h
+│   ├── hop.h
+│   ├── lexer.h
+│   ├── locate.h
+│   ├── parser.h
+│   ├── peek.h
+│   ├── ping.h
+│   ├── resume.h
+│   ├── reveal.h
+│   ├── sequence.h
+│   ├── snoop.h
+│   ├── spy.h
+│   ├── terminal.h
+│   └── user_path.h
+│
+├── src/
+    ├── main.c
+    ├── lexer.c
+    ├── parser.c
+    ├── command.c
+    ├── sequence.c
+    ├── background.c
+    ├── terminal.c
+    ├── activities.c
+    ├── resume.c
+    ├── ping.c
+    ├── spy.c
+    ├── snoop.c
+    ├── hop.c
+    ├── frecency.c
+    ├── user_path.c
+    ├── reveal.c
+    ├── peek.c
+    └── locate.c
+```
 
 
-Instructions to run C-SHELL
+##  Lexer and Parser
+The lexer converts input into a linked list of tokens and supports spaces, tabs, single quotes, double quotes, and backslash escaping. Special operators are `|`, `&`, `;`, `<`, `>`, and `>>`.
+```c
+struct token {
+    enum Token_type type;
+    char *value;
+    struct token *next;
+};
+```
+##  Built-in Commands
+The shell provides:
+```text
+hop  reveal  peek  locate  activities  resume  ping  spy  snoop
+```
+##  `hop`
+Implemented by `hop.c`, `frecency.c`, and `user_path.c`. It changes the current directory and supports `~`, `.`, `..`, and `-`. The `-` form refers to the previous directory. Multiple directory arguments are processed sequentially.
+Visited directories are stored in `hop.log`. The frecency table supports `MAX_ENTRIES = 1000`; each entry contains a path, frequency, and last-visit information. The score is based on `frequency * 1000 + last_visit`.
+Assumptions: paths fit within `PATH_MAX`, `hop.log` is writable when required, and frecency data is stored locally.
+##  `reveal`
+`reveal` lists directory contents.
+```text
+-a    include hidden entries
+-t    recursive traversal
+```
+Examples:
+```bash
+reveal
+reveal -a
+reveal -t
+reveal -at /tmp
+```
+Entries are sorted with `strcmp()`. Recursive mode prints directories with `/` and visits their contents. Directory names are dynamically allocated and released. There is no explicit recursion-depth limit.
+##  `peek`
+`peek` supports:
+```text
+-n    number non-empty lines
+-r    reverse file
+-     read standard input
+```
+Examples:
+```bash
+peek file.txt
+peek -n file.txt
+peek -r file.txt
+peek -nr file.txt
+peek -
+```
+Buffered I/O is used and `lseek()` supports reverse reading. Relevant buffers are 1024 bytes, so very long lines are subject to the fixed buffer limitation. Up to 100 input files are supported.
+##  `locate`
+`locate` searches for executable files in the current directory and `$PATH`. A result must exist, be a regular file, and have execute permission. `$PATH` is assumed to fit within the implementation's path buffer and uses the normal colon-separated format.
+##  Process Groups and Job Control
+Job control is mainly implemented in `background.c`, `terminal.c`, and `command.c`. The shell has its own process group. Every pipeline is placed in one process group, using the first pipeline process's PID as the PGID.
+```text
+Job
+ |
+PGID
+ / | \
+P1 P2 P3
+```
+`setpgid()` is used in both child and parent to reduce process-group creation races.
+##  Background Jobs
+The job table supports `MAX_JOBS = 100` jobs and `MAX_PROCS = 100` processes per job. A job stores its job number, PGID, process list, process count, remaining process count, active state, and command line. Each process stores its PID, name, state, and exit information.
+Internal states are `PROC_RUNNING = 0` and `PROC_STOPPED = 1`. Job numbers start at 1.
+`SIGCHLD` is handled using `sigaction()` and `waitpid()` with `WNOHANG`, `WUNTRACED`, and `WCONTINUED`. A self-pipe notifies the main loop, which calls `drain_background_notifications()` for normal output and cleanup. `block_sigchld()` and `restore_sigchld()` reduce races around job-table operations.
+##  `activities`
+Syntax:
+```bash
+activities
+```
+`activities` calls `get_activities()` and prints one group line followed by one line per process. Example:
+```text
+[1] pgid 3000
+  3000 sleep Running
+[2] pgid 4000
+  4000 cat Running
+  4001 grep Running
+```
+Exited processes are removed before reporting. The activity interface supports up to 100 processes.
+##  `resume`
+Syntax:
+```text
+resume %job_number fg
+resume %job_number bg
+resume %job_number fg --timeout <seconds>
+```
+`resume` finds the job, sends `SIGCONT` to its process group, and marks it running. `bg` returns immediately without changing terminal ownership. `fg` gives the terminal to the group with `tcsetpgrp()`, waits for completion or stopping, and reclaims the terminal.
+With `--timeout`, the foreground wait uses an alarm/timer. If the timeout expires, `SIGTERM` is sent to the process group, the timeout message is printed, and the job is removed. Stopped jobs remain available for later `resume`.
+##  `ping`
+Syntax:
+```text
+ping <target> <signal_number>
+```
+A numeric target is a PID; `%N` is a shell job number.
+```bash
+ping 1234 9
+ping %2 9
+```
+For a job, the signal is sent with `kill(-pgid, signal)`. For a PID, `kill(pid, signal)` is used. The typed signal must be a non-negative integer. The actual value passed to `kill()` is `signal_number % 64`, while the original value is printed. Only shell-tracked PIDs/jobs are accepted.
 
-1. make all
-2. ./shell.out
+## `snoop`
+Syntax:
+```text
+snoop <command> [args...]
+snoop -p <pid>
+```
+`snoop` traces system calls using Linux `ptrace`. For a new command, the child uses `PTRACE_TRACEME`; the parent uses `PTRACE_SYSCALL` for syscall entry/exit and `PTRACE_GETREGS` for registers. Timing uses `CLOCK_MONOTONIC`. `snoop -p` uses `PTRACE_ATTACH`.
+Limits: `MAX_SNOOP_ARGS = 128` and `MAX_SYSCALLS = 450`. Known syscall numbers are mapped to names; unknown numbers are printed as `syscall_N`. Results are sorted by descending call count, with first occurrence order breaking ties.
+The implementation reads `struct user_regs_struct.orig_rax` and uses Linux x86-64 syscall numbering, so `snoop` is architecture-specific and depends on `ptrace` permissions.
+##  Pipelines
+For:
+```bash
+command1 | command2 | command3
+```
+the shell creates pipes, forks each stage, places all stages in one process group, connects stdin/stdout with `dup2()`, applies redirections, gives the terminal to a foreground pipeline, waits, and reclaims the terminal.
+##  Redirection
+Input redirection:
+```bash
+cat < input.txt
+```
+uses `open(..., O_RDONLY)`. Output supports:
+```bash
+echo hello > out.txt
+echo hello >> out.txt
+```
+`>` uses truncation and `>>` uses append. Output files use `O_WRONLY | O_CREAT` plus `O_TRUNC` or `O_APPEND`, with creation mode `0644`. Input/output file arrays support up to 100 entries. Multiple outputs use an output-copier process.
+##  Command Resolution
+External execution supports:
+```text
+/path/to/program
+./program
+program
+%program
+```
+Ordinary names are resolved by checking the current directory and then `$PATH`. `is_executable()` checks existence, regular-file type, and execute permission.
+##  Sequences and Background Execution
+Commands separated by `;` run sequentially:
+```bash
+hop /tmp ; reveal ; peek file.txt
+```
+Background commands use:
+```bash
+command &
+```
+The shell creates a process group, registers the job, returns to the prompt, and tracks it through `SIGCHLD`. A background pipeline is one job:
+```bash
+command1 | command2 &
+```
+##  Terminal Control
+`terminal.c` provides `init_job_control()`, `give_terminal_to()`, and `reclaim_terminal()`. Terminal ownership is changed with `tcsetpgrp()`. The shell ignores terminal-control signals such as `SIGTTIN` and `SIGTTOU` so it can continue managing jobs.
+##  EOF Handling
+`handle_eof()` manages `Ctrl-D`. With no stopped jobs, tracked jobs receive `SIGHUP` and the shell exits. If stopped jobs exist, the first consecutive `Ctrl-D` prints `cshell: there are stopped jobs`; a second permits exit and sends `SIGHUP`. Normal input resets the EOF state.
+##  Resource Limits
+| Resource | Limit |
+|---|---:|
+| Background jobs | 100 |
+| Processes per job | 100 |
+| Activity processes | 100 |
+| Command arguments | 100 |
+| Input files | 100 |
+| Output files | 100 |
+| Pipeline stages/pipe slots | 100 |
+| Snoop arguments | 128 |
+| Snoop syscall entries | 450 |
+| Spy memory paths | 512 |
+| Frecency entries | 1000 |
+| Main input buffer | 1024 bytes |
+| Lexer word buffer | 1024 bytes |
+| Peek line buffer | 1024 bytes |
+| Process name | 64 bytes |
+| Job command line | 256 bytes |
+| Spy path buffer | 4096 bytes |
+| I/O copy buffers | 4096 bytes |
+##  General Assumptions
+1. The shell runs on Linux/POSIX; job-control testing uses an interactive terminal. 
+4. A pipeline's PGID is the first command's PID; a job contains at most 100 tracked processes.
+9. Exited processes are removed from `activities`.
+10. Stopped jobs remain available to `resume`.
+11. `resume --timeout` applies only to foreground jobs.
+12. `ping` accepts only shell-tracked PIDs/jobs.
+13. `ping` reduces signal numbers modulo 64.
+14. `hop.log` stores local frecency information.
+15. `snoop` assumes Linux x86-64.
+16. Recursive `reveal` has no explicit depth limit.
+17. Paths must fit the relevant path buffers.
+18. Long input lines are limited by the shell's input buffer.
 
+##  Summary
+The shell uses a lexer/parser front end followed by modular command implementations. External execution, pipelines, redirection, background jobs, process groups, terminal ownership, filesystem operations, process inspection, and syscall tracing are separated into dedicated modules. The implementation deliberately uses documented fixed limits for jobs, processes, arguments, files, pipelines, syscall statistics, buffers, and frecency entries.
 
- AI_usage drive link : https://drive.google.com/drive/folders/1iPM_BvfCTN4OOraZu-LbFFe_DTi5Ihz6?usp=sharing
+Ai usage Folder Link : https://drive.google.com/drive/folders/1iPM_BvfCTN4OOraZu-LbFFe_DTi5Ihz6?usp=sharing
+
