@@ -445,29 +445,24 @@ int parse_pipeline(struct token *current,struct pipeline_stage **stages,int *sta
     return 1;
 }
 
-void run_pipeline(struct pipeline_stage *stages, int stage_count)
-{
+void run_pipeline(struct pipeline_stage *stages, int stage_count){
     int pipe_count = stage_count - 1;
-
+ 
     int pipes[100][2];
-
+ 
     pid_t children[100];
-
+ 
     /*
      * Initialize children array.
      */
-    for (int i = 0; i < stage_count; i++)
-    {
+    for (int i = 0; i < stage_count; i++){
         children[i] = -1;
     }
-
-    for (int i = 0; i < stage_count; i++)
-    {
+    for (int i = 0; i < stage_count; i++)    {
         stages[i].input_fd = -1;
         stages[i].input_writer = -1;
-
-        if (stages[i].input_count > 0)
-        {
+ 
+        if (stages[i].input_count > 0){
             stages[i].input_fd =
                 setup_input(stages[i].input_files,
                             stages[i].input_count,
@@ -477,8 +472,7 @@ void run_pipeline(struct pipeline_stage *stages, int stage_count)
             {
                 stages[i].setup_failed = 1;
             }
-        }
-
+        } 
         if (stages[i].output_count > 0 &&
             !open_output_files(stages[i].output_files,
                                 stages[i].output_count,
@@ -496,21 +490,18 @@ void run_pipeline(struct pipeline_stage *stages, int stage_count)
                 close(pipes[j][0]);
                 close(pipes[j][1]);
             }
-
             for (int j = 0; j < stage_count; j++)
             {
                 if (stages[j].input_fd != -1)
                 {
                     close(stages[j].input_fd);
                 }
-
                 if (stages[j].input_writer != -1)
                 {
                     waitpid(stages[j].input_writer,
                             NULL,
                             0);
                 }
-
                 if (!stages[j].setup_failed)
                 {
                     for (int k = 0;
@@ -521,7 +512,6 @@ void run_pipeline(struct pipeline_stage *stages, int stage_count)
                     }
                 }
             }
-
             return;
         }
     }
@@ -537,8 +527,7 @@ void run_pipeline(struct pipeline_stage *stages, int stage_count)
                                      pipe_count,
                                      stage_count))
             {
-                stages[i].setup_failed = 1;
-
+                stages[i].setup_failed = 1; 
                 for (int j = 0;
                      j < stages[i].output_count;
                      j++)
@@ -552,8 +541,7 @@ void run_pipeline(struct pipeline_stage *stages, int stage_count)
     sigset_t oldmask = block_sigchld();
     for (int i = 0; i < stage_count; i++)
     {
-        children[i] = fork();
-
+        children[i] = fork(); 
         if (children[i] == -1)
         {
             children[i] = -1;
@@ -694,16 +682,37 @@ void run_pipeline(struct pipeline_stage *stages, int stage_count)
             setpgid(children[i], children[0]);
         }
     }
+    for (int i = 0; i < pipe_count; i++)
+    {
+        close(pipes[i][0]);
+        close(pipes[i][1]);
+    }
+ 
+    for (int i = 0; i < stage_count; i++)
+    {
+        if (stages[i].input_fd != -1)
+        {
+            close(stages[i].input_fd);
+        }
+ 
+        if (stages[i].output_count > 0 &&
+            !stages[i].setup_failed)
+        {
+            for (int j = 0; j < stages[i].output_count; j++)
+            {
+                close(stages[i].output_fds[j]);
+            }
+        }
+ 
+        if (stages[i].output_pipe[0] != -1)
+        {
+            close(stages[i].output_pipe[0]);
+            close(stages[i].output_pipe[1]);
+        }
+    }
     if (children[0] == -1)
     {
         restore_sigchld(oldmask);
-
-        for (int i = 0; i < pipe_count; i++)
-        {
-            close(pipes[i][0]);
-            close(pipes[i][1]);
-        }
-
         return;
     }
     pid_t pgid = children[0];
@@ -743,13 +752,13 @@ void run_pipeline(struct pipeline_stage *stages, int stage_count)
             }
         }
         char cmdline[256] = "";
-for (int i = 0; i < stage_count; i++) {
-    if (i > 0) strncat(cmdline, " | ", sizeof(cmdline) - strlen(cmdline) - 1);
-    for (int j = 0; j < stages[i].argc; j++) {
-        strncat(cmdline, stages[i].argv[j], sizeof(cmdline) - strlen(cmdline) - 1);
-        if (j < stages[i].argc - 1) strncat(cmdline, " ", sizeof(cmdline) - strlen(cmdline) - 1);
-    }
-}
+        for (int i = 0; i < stage_count; i++) {
+          if (i > 0) strncat(cmdline, " | ", sizeof(cmdline) - strlen(cmdline) - 1);
+          for (int j = 0; j < stages[i].argc; j++) {
+            strncat(cmdline, stages[i].argv[j], sizeof(cmdline) - strlen(cmdline) - 1);
+            if (j < stages[i].argc - 1) strncat(cmdline, " ", sizeof(cmdline) - strlen(cmdline) - 1);
+           }
+        }
         register_stopped_job(pgid,
                              pids,
                              names,
@@ -758,42 +767,7 @@ for (int i = 0; i < stage_count; i++) {
 
     restore_sigchld(oldmask);
 
-    for (int i = 0; i < pipe_count; i++)
-    {
-        close(pipes[i][0]);
-        close(pipes[i][1]);
-    }
-
-    for (int i = 0;
-         i < stage_count;
-         i++)
-    {
-        if (stages[i].input_fd != -1)
-        {
-            close(stages[i].input_fd);
-        }
-
-
-        if (stages[i].output_count > 0 &&
-            !stages[i].setup_failed)
-        {
-            for (int j = 0;
-                 j < stages[i].output_count;
-                 j++)
-            {
-                close(stages[i].output_fds[j]);
-            }
-        }
-
-
-        if (stages[i].output_pipe[0] != -1)
-        {
-            close(stages[i].output_pipe[0]);
-            close(stages[i].output_pipe[1]);
-        }
-    }
 }
-
 int exec_command(struct token *current)
 {
     if (has_pipeline(current))
